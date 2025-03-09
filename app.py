@@ -1,27 +1,57 @@
-from flask import Flask
+from flask import Flask, request
 from flask_restful import Resource, Api
 
 app = Flask(__name__)
 api = Api(app)
 
-class Convo(Resource):
+class Convos():
+    convos = []
+    _next_id = 0
+
+    def __getitem__(self, convo_id):
+        for convo in self.convos:
+            if convo.id == convo_id:
+                return convo
+        return None
+            
+    def _get_next_id(self):
+        self._next_id += 1
+        return self._next_id
+    
+    def all(self):
+        return self.convos
+
     def get(self):
-        return {
-            "convo_id": 0,
-            "name": "Conversation 0",
-            "user_ids": [0, 1, 2],
-            "message_ids": [0, 1, 2]
-        }
+        return self.convos
 
-    def post(self, convo_id, name, user_ids, message_ids):
-        return {
-            "convo_id": convo_id,
-            "name": name,
-            "user_ids": user_ids,
-            "message_ids": message_ids
-        }
+    def post(self):
+        name = request.form.get("name")
+        user_ids = request.form.get("user_ids")
+        print(f"Received POST request for convo with args {name}, {user_ids}")
+        self.convos.append(Convo(self._get_next_id(), name, user_ids))
 
-    def put(self, convo_id, name, user_ids, message_ids):
+class Convo(Resource):
+    def __init__(self, id, name, user_ids):
+        self.id = id
+        self.name = name
+        self.user_ids = user_ids
+        self.message_ids = []
+    
+    def get(self, convo_id):
+        print(f"Received GET request for convo id {convo_id}")
+        return Convos[convo_id] or Convos.all()
+
+    def post(self):
+        name = request.form.get("name")
+        user_ids = request.form.get("user_ids")
+        print(f"Received POST request for convo with args {name}, {user_ids}")
+        convos.append(Convo(name, user_ids))
+
+    def put(self, convo_id):
+        name = request.form.get("name")
+        user_ids = request.form.get("user_ids")
+        message_ids = request.form.get("message_ids")
+        print(f"Received PUT request for convo id {convo_id} with args {name}, {user_ids}, {message_ids}")
         return {
             "convo_id": convo_id,
             "name": name,
@@ -30,6 +60,7 @@ class Convo(Resource):
         }
 
     def delete(self, convo_id):
+        print(f"Received DELETE request for convo id {convo_id}")
         return {
             "convo_id": convo_id
         }
@@ -89,9 +120,9 @@ class User(Resource):
         }
 
 
-api.add_resource(Convo, '/convo/<int:convo_id>')
-api.add_resource(Message, '/message/<int:message_id>')
-api.add_resource(User, '/user/<int:user_id>')
+api.add_resource(Convo, "/convo", "/convo/<int:convo_id>")
+api.add_resource(Message, "/convo/<int:convo_id>/message/<int:message_id>", "/message/<int:message_id>")
+api.add_resource(User, "/user/<int:user_id>")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run()
