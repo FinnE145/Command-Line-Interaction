@@ -1,25 +1,31 @@
 from requests import get, post, put, delete
+from iformat import iprint
 
-def make_request(method, url, data=None, **kwargs):
-    response = method(url, data=data, **kwargs)
-    if response.status_code == 200:
-        return response.json()
-    return f"Error: {response.status_code}, {response.text}"
+def make_request(method, url, json=None, **kwargs):
+    response = method(url, json=json, **kwargs)
+    if response.status_code//100 == 2:
+        iprint(response.json())
+    else:
+        iprint(f"Error: {response.status_code}, {response.text}")
 
+if input("Create messages?"):
 
+    make_request(post, "http://localhost:5000/messages", json={
+        "convo_id": 0,
+        "user_id": 0,
+        "content": "Hello, World!"
+    })
 
-print(make_request(get, "http://localhost:5000/convo/0"))
+    make_request(post, "http://localhost:5000/messages", json={
+        "convo_id": 0,
+        "user_id": 1,
+        "content": "Hello, World!"
+    })
 
-print(make_request(post, "http://localhost:5000/convo/0", {
-        "name": "New Conversation",
-        "user_ids": [0, 1, 2],
-        "message_ids": [0, 1, 2]
-    }))
+    make_request(post, "http://localhost:5000/messages", json={
+        "convo_id": 1,
+        "user_id": 1,
+        "content": "Hello, World!"
+    })
 
-print(make_request(put, "http://localhost:5000/convo/0", {
-        "name": "Updated Conversation",
-        "user_ids": [0, 1, 3],
-        "message_ids": [0, 1]
-    }))
-
-print(make_request(delete, "http://localhost:5000/convo/0"))
+make_request(get, "http://localhost:5000/message/")
