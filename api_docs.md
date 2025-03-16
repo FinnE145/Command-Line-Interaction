@@ -39,7 +39,7 @@
 - Error messages are returned as plain text with an HTTP status code other than 2xx.
 - For endpoints that accept IDs and filters (e.g. [`/messages`](#messages-2) `GET`), IDs take precedence over filters. If both are provided, the filters will be ignored.
 - For endpoints with filters, the results are joined with `AND` (inner join).\
-E.g. If `user_ids=0,1` and `convo_ids=0` are provided, only messages from sent by users 0 and 1 in conversation 0 will be returned. To get all messages send by users 0 and 1 and all messages in conversation 0, make multiple requests.
+E.g. If `user_ids=0,1` and `convo_ids=0` are provided, only messages from sent by users `0` and `1` in conversation `0` will be returned. To get all messages sent by users `0` and `1` and all messages in conversation `0`, make multiple requests.
 
 ## Messages
 
