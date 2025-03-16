@@ -31,7 +31,7 @@
     python app.py
     ```
 2. The API will be available at `http://localhost:5000`.
-2. a) [Optional] Use various means of port forwarding to make your API instance available on your local network or the internet. Look into vscode port forwarding for the simplest solution.
+    a) [Optional] Use various means of port forwarding to make your API instance available on your local network or the internet. Look into vscode port forwarding for the simplest solution.
 3. Run the CLI client:
     ```
     python client.py
