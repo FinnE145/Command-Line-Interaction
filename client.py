@@ -49,7 +49,7 @@ def create_user(username):
         "name": username
     })
     if r:
-        print(f"{cr.Fore.CYAN}User created: {r.get('user_id')}{cr.Style.RESET_ALL}")
+        print(f"{cr.Fore.CYAN}User created: {username} (#{r.get('user_id')}){cr.Style.RESET_ALL}")
         global current_user_id
         current_user_id = r.get('user_id')
 
