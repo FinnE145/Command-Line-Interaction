@@ -42,28 +42,28 @@ make_request("post", "http://localhost:5000/messages", json={
     "contents": ["Hello, World!", "Hello, World!"]
 }) """
 
-make_request("post", "http://localhost:5000/convos", json={
-    "name": "testchat"
+make_request("post", "http://localhost:5000/users", json={
+    "name": "billybob"
 })
 
-make_request("get", "http://localhost:5000/convos")
+make_request("get", "http://localhost:5000/users")
 
 make_request("post", "http://localhost:5000/messages", json={
     "convo_id": 0,
     "user_id": 0,
-    "content": "I just created a chat!"
+    "content": "I just created a user!"
 })
 
-make_request("get", "http://localhost:5000/messages?convo_ids=0")
+make_request("get", "http://localhost:5000/messages?user_ids=0")
 
-make_request("put", "http://localhost:5000/convo/0", json={
+make_request("put", "http://localhost:5000/user/0", json={
     "name": "newname"
 })
 
-make_request("get", "http://localhost:5000/convo/0")
+make_request("get", "http://localhost:5000/user/0")
 
-make_request("delete", "http://localhost:5000/convo/0")
+make_request("delete", "http://localhost:5000/user/0")
 
-make_request("get", "http://localhost:5000/convo/0")
+make_request("get", "http://localhost:5000/user/0")
 
-make_request("get", "http://localhost:5000/convos")
+make_request("get", "http://localhost:5000/users")
