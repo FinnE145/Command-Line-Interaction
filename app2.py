@@ -26,14 +26,10 @@ class MessageList:
 
     def query_filter(func):
         def wrapper(self, start=0, end=None, max_results=None, convo_ids=_always_in(), user_ids=_always_in(), message_ids=None):
-            iprint(self.messages[start:end])
-            iprint(f"start: {start}, end: {end}, max_results: {max_results}, convo_ids: {convo_ids}, user_ids: {user_ids}, message_ids: {message_ids}")
             if message_ids:
                 res = list(filter(lambda m: m.message_id in message_ids, self.messages[start:end]))
-                iprint("Using message_ids", res)
             else:
                 res = list(filter(lambda m: m.convo_id in convo_ids and m.user_id in user_ids, self.messages[start:end]))
-                iprint("Using convo_ids and user_ids", res)
             max_results = len(res) if max_results == None else max_results
             return func(self, res[:max_results])
         return wrapper
@@ -63,18 +59,16 @@ msgs_list = MessageList()
 
 class Message(default501):
     def get(self, message_id):
-        self = msgs_list.query_get(message_ids=[message_id])
-        if self is None:
+        msgs = msgs_list.query_get(message_ids=[message_id])
+        if msgs is None or len(msgs) == 0:
             return {"error": f"Message {message_id} does not exist"}, 404
-        return marshal(self, message_fields)
+        return marshal(msgs[0], message_fields)
 
 class Messages(default501):
     def get(self):
         try:
             message_ids = [int(id) for id in request.args.get("message_ids", "").split(",") if id]
         except Exception as e:
-            print(e)
-            iprint(e.with_traceback(None))
             return {"error": "Invalid value for message_ids"}, 400
         try:
             convo_ids = [int(id) for id in request.args.get("convo_ids", "").split(",") if id] or _always_in()
@@ -93,16 +87,31 @@ class Messages(default501):
         except ValueError:
             return {"error": "Invalid value for end"}, 400
 
-        print(f"message_ids: {message_ids}, convo_ids: {convo_ids}, user_ids: {user_ids}, start: {start}, end: {end}")
         return [marshal(m, message_fields) for m in msgs_list.query_get(start=start, end=end, convo_ids=convo_ids, user_ids=user_ids, message_ids=message_ids)]
 
     def post(self):
-        self.convo_id = int(request.json.get("convo_id"))
-        self.user_id = int(request.json.get("user_id"))
-        self.content = request.json.get("content")
-        if self.convo_id is None or self.user_id is None or self.content is None:
+        try:
+            convo_ids = [int(i) for i in (request.json.get("convo_ids") or [request.json.get("convo_id")])]
+        except ValueError:
+            return {"error": "Invalid value for convo_id(s)"}, 400
+        try:
+            user_ids = [int(i) for i in (request.json.get("user_ids") or [request.json.get("user_id")])]
+        except ValueError:
+            return {"error": "Invalid value for user_id"}, 400
+        contents = request.json.get("contents") or [request.json.get("content")]
+        if len(convo_ids) != len(user_ids) or len(convo_ids) != len(contents):
+            return {"error": "All fields must contain the same number of items"}, 400
+        invalid_options = [[], None, [None]]
+        if convo_ids in invalid_options or user_ids in invalid_options or contents in invalid_options:
             return {"error": "Missing required fields"}, 400
-        return msgs_list.query_add(self).message_id, 201
+        ids = []
+        for convo_id, user_id, content in zip(convo_ids, user_ids, contents):
+            m = Message()
+            m.convo_id = convo_id
+            m.user_id = user_id
+            m.content = content
+            ids.append(msgs_list.query_add(m).message_id)
+        return {"message_ids": ids}
 
 class User(default501):
     pass
@@ -110,11 +119,112 @@ class User(default501):
 class Users(default501):
     pass
 
+convo_fields = {
+    "convo_id": fields.Integer,
+    "name": fields.String
+}
+
+class ConvoList:
+    def __init__(self):
+        self.convo_id = -1
+        self.convos = []
+
+    def _get_next_convo_id(self):
+        self.convo_id += 1
+        return self.convo_id
+
+    def query_filter(func):
+        def wrapper(self, start=0, end=None, max_results=None, convo_ids=None):
+            if convo_ids:
+                res = list(filter(lambda m: m.convo_id in convo_ids, self.convos[start:end]))
+            else:
+                return self.convos[start:end]
+            max_results = len(res) if max_results == None else max_results
+            return func(self, res[:max_results])
+        return wrapper
+
+    @query_filter
+    def query_get(self, convos):
+        return convos
+
+    def query_add(self, convo):
+        convo.convo_id = self._get_next_convo_id()
+        self.convos.append(convo)
+        return convo
+
+    def query_update(self, convo_id, name):
+        for convo in self.convos:
+            if convo.convo_id == convo_id:
+                convo.name = name
+                return convo
+        return None
+
+    @query_filter
+    def query_delete(self, convos):
+        ids = []
+        for convo in convos:
+            ids.append(convo.convo_id)
+            self.convos.remove(convo)
+        return ids
+
+convos_list = ConvoList()
+
 class Convo(default501):
-    pass
+    def get(self, convo_id):
+        convos = convos_list.query_get(convo_ids=[convo_id])
+        if convos is None or len(convos) == 0:
+            return {"error": f"Convo {convo_id} does not exist"}, 404
+        return marshal(convos[0], convo_fields)
+
+    def put(self, convo_id):
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        c = convos_list.query_update(convo_id, name)
+        if c is None:
+            return {"error": f"Convo {convo_id} does not exist"}, 404
+        return marshal(c, convo_fields)
+    
+    def delete(self, convo_id):
+        deleted_ids = convos_list.query_delete(convo_ids=[convo_id])
+        if len(deleted_ids) == 0:
+            return {"error": f"Convo {convo_id} does not exist"}, 404
+        return {"convo_id": deleted_ids[0]}
 
 class Convos(default501):
-    pass
+    def get(self):
+        try:
+            convo_ids = [int(id) for id in request.args.get("convo_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for convo_ids"}, 400
+        try:
+            start = int(request.args.get("start", 0))
+        except ValueError:
+            return {"error": "Invalid value for start"}, 400
+        try:
+            end = int(v) if (v:=request.args.get("end", None)) else None
+        except ValueError:
+            return {"error": "Invalid value for end"}, 400
+
+        return [marshal(c, convo_fields) for c in convos_list.query_get(start=start, end=end, convo_ids=convo_ids)]
+    
+    def post(self):
+        # TODO: Implement bulk creation
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        c = Convo()
+        c.name = name
+        return {"convo_id": convos_list.query_add(c).convo_id}
+
+    def delete(self):
+        try:
+            convo_ids = [int(id) for id in request.json.get("convo_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for convo_ids"}, 400
+        if convo_ids is None:
+            return {"error": "Missing required field"}, 400
+        return {"convo_ids": convos_list.query_delete(convo_ids=convo_ids)}
 
 class ConvoUser(default501):
     pass
@@ -122,7 +232,7 @@ class ConvoUser(default501):
 class ConvoUsers(default501):
     pass
 
-api.add_resource(Message, "/messages/<int:message_id>", endpoint="message")
+api.add_resource(Message, "/message/<int:message_id>", endpoint="message")
 api.add_resource(Messages, "/messages", endpoint="messages")
 
 api.add_resource(User, "/user/<int:user_id>", endpoint="user")
