@@ -113,11 +113,112 @@ class Messages(default501):
             ids.append(msgs_list.query_add(m).message_id)
         return {"message_ids": ids}
 
+user_fields = {
+    "user_id": fields.Integer,
+    "name": fields.String
+}
+
+class UserList:
+    def __init__(self):
+        self.user_id = -1
+        self.users = []
+
+    def _get_next_user_id(self):
+        self.user_id += 1
+        return self.user_id
+
+    def query_filter(func):
+        def wrapper(self, start=0, end=None, max_results=None, user_ids=None):
+            if user_ids:
+                res = list(filter(lambda m: m.user_id in user_ids, self.users[start:end]))
+            else:
+                return self.users[start:end]
+            max_results = len(res) if max_results == None else max_results
+            return func(self, res[:max_results])
+        return wrapper
+
+    @query_filter
+    def query_get(self, users):
+        return users
+
+    def query_add(self, user):
+        user.user_id = self._get_next_user_id()
+        self.users.append(user)
+        return user
+
+    def query_update(self, user_id, name):
+        for user in self.users:
+            if user.user_id == user_id:
+                user.name = name
+                return user
+        return None
+
+    @query_filter
+    def query_delete(self, users):
+        ids = []
+        for user in users:
+            ids.append(user.user_id)
+            self.users.remove(user)
+        return ids
+    
+users_list = UserList()
+
 class User(default501):
-    pass
+    def get(self, user_id):
+        users = users_list.query_get(user_ids=[user_id])
+        if users is None or len(users) == 0:
+            return {"error": f"User {user_id} does not exist"}, 404
+        return marshal(users[0], user_fields)
+
+    def put(self, user_id):
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        u = users_list.query_update(user_id, name)
+        if u is None:
+            return {"error": f"User {user_id} does not exist"}, 404
+        return marshal(u, user_fields)
+
+    def delete(self, user_id):
+        deleted_ids = users_list.query_delete(user_ids=[user_id])
+        if len(deleted_ids) == 0:
+            return {"error": f"User {user_id} does not exist"}, 404
+        return {"user_id": deleted_ids[0]}
 
 class Users(default501):
-    pass
+    def get(self):
+        try:
+            user_ids = [int(id) for id in request.args.get("user_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for user_ids"}, 400
+        try:
+            start = int(request.args.get("start", 0))
+        except ValueError:
+            return {"error": "Invalid value for start"}, 400
+        try:
+            end = int(v) if (v:=request.args.get("end", None)) else None
+        except ValueError:
+            return {"error": "Invalid value for end"}, 400
+
+        return [marshal(u, user_fields) for u in users_list.query_get(start=start, end=end, user_ids=user_ids)]
+    
+    def post(self):
+        # TODO: Implement bulk creation
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        u = User()
+        u.name = name
+        return {"user_id": users_list.query_add(u).user_id}
+    
+    def delete(self):
+        try:
+            user_ids = [int(id) for id in request.json.get("user_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for user_ids"}, 400
+        if user_ids is None:
+            return {"error": "Missing required field"}, 400
+        return {"user_ids": users_list.query_delete(user_ids=user_ids)}
 
 convo_fields = {
     "convo_id": fields.Integer,
