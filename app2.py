@@ -8,6 +8,8 @@ from utils import default501, _always_in
 app = Flask(__name__)
 api = Api(app)
 
+api.prefix = "/api"
+
 message_fields = {
     "message_id": fields.Integer,
     "convo_id": fields.Integer,
@@ -31,7 +33,7 @@ class MessageList:
             else:
                 res = list(filter(lambda m: m.convo_id in convo_ids and m.user_id in user_ids, self.messages[start:end]))
             max_results = len(res) if max_results == None else max_results
-            return func(self, res[:max_results])
+            return func(self, res[-max_results:])
         return wrapper
 
     @query_filter
@@ -134,7 +136,7 @@ class UserList:
             else:
                 return self.users[start:end]
             max_results = len(res) if max_results == None else max_results
-            return func(self, res[:max_results])
+            return func(self, res[-max_results:])
         return wrapper
 
     @query_filter
@@ -241,7 +243,7 @@ class ConvoList:
             else:
                 return self.convos[start:end]
             max_results = len(res) if max_results == None else max_results
-            return func(self, res[:max_results])
+            return func(self, res[-max_results:])
         return wrapper
 
     @query_filter
@@ -333,17 +335,17 @@ class ConvoUser(default501):
 class ConvoUsers(default501):
     pass
 
-api.add_resource(Message, "/message/<int:message_id>", endpoint="message")
+api.add_resource(Message, "/messages/<int:message_id>", endpoint="message")
 api.add_resource(Messages, "/messages", endpoint="messages")
 
-api.add_resource(User, "/user/<int:user_id>", endpoint="user")
+api.add_resource(User, "/users/<int:user_id>", endpoint="user")
 api.add_resource(Users, "/users", endpoint="users")
 
-api.add_resource(Convo, "/convo/<int:convo_id>", endpoint="convo")
+api.add_resource(Convo, "/convos/<int:convo_id>", endpoint="convo")
 api.add_resource(Convos, "/convos", endpoint="convos")
 
-api.add_resource(ConvoUser, "/convo/<int:convo_id>/user/<int:user_id>", endpoint="convo_user")
-api.add_resource(ConvoUsers, "/convo/<int:convo_id>/users", endpoint="convo_users")
+api.add_resource(ConvoUser, "/convos/<int:convo_id>/users/<int:user_id>", endpoint="convo_user")
+api.add_resource(ConvoUsers, "/convos/<int:convo_id>/users", endpoint="convo_users")
 
 @app.errorhandler(404)
 def page_not_found(e):
