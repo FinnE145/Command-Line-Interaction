@@ -123,3 +123,7 @@ dmypy.json
 
 # VS Code
 .vscode/
+
+# Testing files
+test.py
+test/
