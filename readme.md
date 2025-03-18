@@ -37,7 +37,8 @@
     ```
     python client.py
     ```
-4. Follow the prompts to interact with the API.
+    > Tip: Pass the URL of a public API instance as an argument (e.g. `python client.py https://example.com/api`). Note the lack of trailing slash.
+4. Follow the prompts and use `/help` to interact with the API.
 
 # API Information
 
