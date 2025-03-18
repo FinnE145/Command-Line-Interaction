@@ -1,31 +1,69 @@
-from requests import get, post, put, delete
+from requests import sessions
 from iformat import iprint
+from sys import argv
+
+s = sessions.Session()
 
 def make_request(method, url, json=None, **kwargs):
-    response = method(url, json=json, **kwargs)
+    response = s.__getattribute__(method)(url, json=json, **kwargs)
     if response.status_code//100 == 2:
         iprint(response.json())
     else:
-        iprint(f"Error: {response.status_code}, {response.text}")
+        iprint(f"Error: {response.status_code}, {response.json().get('error') or response.text}")
 
-if input("Create messages?"):
-
-    make_request(post, "http://localhost:5000/messages", json={
+if len(argv) < 2 and input("Create messages?"):
+    make_request("post", "http://localhost:5000/messages", json={
         "convo_id": 0,
         "user_id": 0,
         "content": "Hello, World!"
     })
 
-    make_request(post, "http://localhost:5000/messages", json={
+    make_request("post", "http://localhost:5000/messages", json={
         "convo_id": 0,
         "user_id": 1,
         "content": "Hello, World!"
     })
 
-    make_request(post, "http://localhost:5000/messages", json={
+    make_request("post", "http://localhost:5000/messages", json={
         "convo_id": 1,
         "user_id": 1,
         "content": "Hello, World!"
     })
 
-make_request(get, "http://localhost:5000/message/")
+""" make_request("post", "http://localhost:5000/messages", json={
+    "convo_id": 0,
+    "user_id": 0,
+    "content": "Hello, World!"
+})
+
+make_request("post", "http://localhost:5000/messages", json={
+    "convo_ids": [0, 0],
+    "user_ids": [0, 1],
+    "contents": ["Hello, World!", "Hello, World!"]
+}) """
+
+make_request("post", "http://localhost:5000/convos", json={
+    "name": "testchat"
+})
+
+make_request("get", "http://localhost:5000/convos")
+
+make_request("post", "http://localhost:5000/messages", json={
+    "convo_id": 0,
+    "user_id": 0,
+    "content": "I just created a chat!"
+})
+
+make_request("get", "http://localhost:5000/messages?convo_ids=0")
+
+make_request("put", "http://localhost:5000/convo/0", json={
+    "name": "newname"
+})
+
+make_request("get", "http://localhost:5000/convo/0")
+
+make_request("delete", "http://localhost:5000/convo/0")
+
+make_request("get", "http://localhost:5000/convo/0")
+
+make_request("get", "http://localhost:5000/convos")
