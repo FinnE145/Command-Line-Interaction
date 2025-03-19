@@ -1,292 +1,355 @@
 from flask import Flask, request
-from flask_restful import Resource, Api
+from flask_restful import Resource, Api, abort, fields, marshal
+from functools import wraps
+from iformat import iprint
+
+from utils import default501, _always_in
 
 app = Flask(__name__)
 api = Api(app)
 
-class IndexedCollection:
-    """
-    A collection of items of a given instance type that can be accessed by ID.
-    """
-    def __init__(self, instance_type):
-        """
-        Initializes the collection and saves given instance type to be used for new items.
-        """
-        self._instance_type = instance_type
-        self._collection = {}
-        self._next_id = 0
+api.prefix = "/api"
 
-    def _get_next_id(self):
-        """
-        Returns the next available ID for the collection, and increments the internal counter.
-        """
-        self._next_id += 1
-        return self._next_id - 1
+message_fields = {
+    "message_id": fields.Integer,
+    "convo_id": fields.Integer,
+    "user_id": fields.Integer,
+    "content": fields.String
+}
 
-    def __getitem__(self, id):
-        return self._collection.get(id)
-
-    def __setitem__(self, id, value):
-        self._collection[id] = value
-
-    def __delitem__(self, id):
-        del self._collection[id]
-
-    def all(self):
-        """
-        Returns all items in the collection.
-        """
-        return self._collection
-
-    def new(self, *args):
-        """
-        Creates a new instance of the collection's instance type and adds it to the collection.
-        """
-        id = self._get_next_id()
-        self._collection[id] = self._instance_type(id, *args)
-
-class Convo(Resource):
-    """
-    A conversation between multiple users with a given name.
-    """
-    def __init__(self, id, name, user_ids):
-        """
-        Initializes the conversation with the given ID, name, and user IDs.
-        """
-        self.id = id
-        self.name = name
-        self.user_ids = user_ids
-    
-    def get(self, convo_id = None):
-        """
-        Returns the conversation with the given ID, or all conversations if no ID is given.
-        """
-        print(f"Received GET request for convo id {convo_id}")
-        return convos[convo_id] or convos.all()
-
-    def post(self, convo_id = None):
-        """
-        Creates a new conversation with the given name and user IDs. If a conversation ID is given (endpoint='convo_user'), adds the user with the given ID to the conversation.
-        """
-        if request.endpoint == "convo_user":
-            user_id = request.view_args["user_id"]
-            print(f"Received POST request for convo id {convo_id} with args {user_id} (endpoint='convo_user')")
-            convos[convo_id].user_ids.append(user_id)
-        else:
-            name = request.form.get("name")
-            user_ids = request.form.get("user_ids", [])
-            print(f"Received POST request for convo with args {name}, {user_ids}")
-            convos.new(name, user_ids)
-
-    def put(self, convo_id):
-        """
-        Updates the conversation with the given ID with the given name and user IDs.
-        """
-        name = request.form.get("name", convos[convo_id].name)
-        user_ids = request.form.get("user_ids", convos[convo_id].user_ids)
-        print(f"Received PUT request for convo id {convo_id} with args {name}, {user_ids}")
-        convos[convo_id].name = name
-        convos[convo_id].user_ids = user_ids
-
-    def patch(self, convo_id):
-        """
-        Adds/removes the users with the given IDs to/from the conversation with the given ID.
-        """
-        add_user_ids = request.form.get("add_user_ids")
-        remove_user_ids = request.form.get("remove_user_ids")
-        print(f"Received PATCH request for convo id {convo_id} with args {add_user_ids}, {remove_user_ids}")
-        convos[convo_id].user_ids.extend(add_user_ids)
-        for user_id in remove_user_ids:
-            convos[convo_id].user_ids.remove(user_id)
-
-
-    def delete(self, convo_id):
-        """
-        Deletes the conversation with the given ID. If a user ID is given (endpoint='convo_user'), removes the user with the given ID from the conversation.
-        """
-        if request.endpoint == "convo_user":
-            user_id = request.view_args["user_id"]
-            print(f"Received DELETE request for convo id {convo_id} with args {user_id} (endpoint='convo_user')")
-            convos[convo_id].user_ids.remove(user_id)
-        else:
-            print(f"Received DELETE request for convo id {convo_id}")
-            del convos[convo_id]
-
-class Convos(IndexedCollection):
-    """
-    A collection of conversations.
-    """
+class MessageList:
     def __init__(self):
-        super().__init__(Convo)
+        self.message_id = -1
+        self.messages = []
 
-convos = Convos()
+    def _get_next_message_id(self):
+        self.message_id += 1
+        return self.message_id
 
-class Message(Resource):
-    """
-    A message sent by a user in a conversation.
-    """
-    def __init__(self, id, content, user_id, convo_id):
-        """
-        Initializes the message with the given ID, content, user ID, and conversation ID.
-        """
-        self.id = id
-        self.content = content
-        self.user_id = user_id
-        self.convo_id = convo_id
+    def query_filter(func):
+        def wrapper(self, start=0, end=None, max_results=None, convo_ids=_always_in(), user_ids=_always_in(), message_ids=None):
+            if message_ids:
+                res = list(filter(lambda m: m.message_id in message_ids, self.messages[start:end]))
+            else:
+                res = list(filter(lambda m: m.convo_id in convo_ids and m.user_id in user_ids, self.messages[start:end]))
+            max_results = len(res) if max_results == None else max_results
+            return func(self, res[-max_results:])
+        return wrapper
 
-    def get(self, message_id = None):
-        """
-        Returns the message with the given ID, or all messages if no ID is given.
-        """
-        print(f"Received GET request for message id {message_id}")
-        return msgs[message_id] or msgs.all()
+    @query_filter
+    def query_get(self, messages):
+        return messages
 
-    def post(self, convo_id):
-        """
-        Creates a new message in the conversation with the given ID.
-        """
-        content = request.form.get("content")
-        user_id = request.form.get("user_id")
-        print(f"Received POST request for message in convo id {convo_id} with args {content}, {user_id}")
-        msgs.append_new(convo_id, content, user_id)
+    def query_add(self, message):
+        message.message_id = self._get_next_message_id()
+        self.messages.append(message)
+        return message
 
-    def put(self, message_id, convo_id = None):
-        """
-        Updates the content of the message with the given ID, or the message with the given ID in the conversation with the given ID. This method is faster when the conversation ID is known.
-        """
-        content = request.form.get("content", msgs.get_by_message_id(message_id).content)
-        print(f"Received PUT request for message id {message_id}{f' in convo id {convo_id}' if convo_id else ''} with args {content}")
-        if convo_id:
-            msgs.get_by_convo_id(convo_id, message_id).content = content
-        else:
-            msgs.get_by_message_id(message_id).content = content
+    def query_update(self, message_id, content):
+        for message in self.messages:
+            if message.message_id == message_id:
+                message.content = content
+                return message
+        return None
 
-    def delete(self, message_id, convo_id = None):
-        """
-        Deletes the message with the given ID, or the message with the given ID in the conversation with the given ID. This method is faster when the conversation ID is known.
-        """
-        print(f"Received DELETE request for message id {message_id}")
-        if convo_id:
-            msgs.remove_by_convo_id(convo_id, message_id)
-        else:
-            msgs.remove_by_message_id(message_id)
+    @query_filter
+    def query_delete(self, messages):
+        for message in messages:
+            self.messages.remove(message)
 
-class Messages(IndexedCollection):
-    """
-    A collection of messages.
-    """
-    def __init__(self):
-        super().__init__(list)
+msgs_list = MessageList()
 
-    def append_to(self, id, value):
-        """
-        Appends a value to the list stored under the given conversation ID.
-        """
-        self._collection[id].append(value)
-    
-    def append_new(self, id, *args):
-        """
-        Creates a new message and appends it to the list stored under the given conversation ID.
-        """
-        self._collection[id].append(self._instance_type(self._get_next_id(), *args))
+class Message(default501):
+    def get(self, message_id):
+        msgs = msgs_list.query_get(message_ids=[message_id])
+        if msgs is None or len(msgs) == 0:
+            return {"error": f"Message {message_id} does not exist"}, 404
+        return marshal(msgs[0], message_fields)
 
-    def get_by_convo_id(self, convo_id, message_id = None):
-        """
-        Returns the message with the given ID in the conversation with the given ID, or all messages in the conversation if no message ID is given.
-        """
-        return self._collection[convo_id][message_id] or self._collection[convo_id].all()
+class Messages(default501):
+    def get(self):
+        try:
+            message_ids = [int(id) for id in request.args.get("message_ids", "").split(",") if id]
+        except Exception as e:
+            return {"error": "Invalid value for message_ids"}, 400
+        try:
+            convo_ids = [int(id) for id in request.args.get("convo_ids", "").split(",") if id] or _always_in()
+        except ValueError:
+            return {"error": "Invalid value for convo_ids"}, 400
+        try:
+            user_ids = [int(id) for id in request.args.get("user_ids", "").split(",") if id] or _always_in()
+        except ValueError:
+            return {"error": "Invalid value for user_ids"}, 400
+        try:
+            start = int(request.args.get("start", 0))
+        except ValueError:
+            return {"error": "Invalid value for start"}, 400
+        try:
+            end = int(v) if (v:=request.args.get("end", None)) else None
+        except ValueError:
+            return {"error": "Invalid value for end"}, 400
 
-    def get_by_message_id(self, message_id):
-        """
-        Returns the message with the given ID from any conversation. This method is slower than get_by_convo_id, and should only be used when the conversation ID is not known.
-        """
-        for convo in self._collection.values():
-            for message in convo:
-                if message.id == message_id:
-                    return message
-    
-    def remove_by_convo_id(self, convo_id, message_id = None):
-        """"
-        Deletes the message with the given ID from the conversation with the given ID, or clears all messages from the conversation if no message ID is given.
-        """
-        if message_id:
-            del self._collection[convo_id][message_id]
-        else:
-            del self._collection[convo_id]
-    
-    def remove_by_message_id(self, message_id):
-        """
-        Deletes the message with the given ID from any conversation. This method is slower than remove_by_convo_id, and should only be used when the conversation ID is not known.
-        """
-        for convo in self._collection.values():
-            for message in convo:
-                if message.id == message_id:
-                    del convo[message_id]
-
-msgs = Messages()
-
-class User(Resource):
-    """
-    A user with a given name and email address.
-    """
-    def __init__(self, id, name, email):
-        """
-        Initializes the user with the given ID, name, and email address.
-        """
-        self.id = id
-        self.name = name
-        self.email = email
-        self.active = True
-
-    def get(self, user_id = None):
-        """
-        Returns the user with the given ID, or all users if no ID is given.
-        """
-        print(f"Received GET request for user id {user_id}")
-        return users[user_id] or users.all()
+        return [marshal(m, message_fields) for m in msgs_list.query_get(start=start, end=end, convo_ids=convo_ids, user_ids=user_ids, message_ids=message_ids)]
 
     def post(self):
-        """
-        Creates a new user with the given name, email address, and active status (default True).
-        """
-        name = request.form.get("name")
-        email = request.form.get("email")
-        active = request.form.get("active", True)
-        print(f"Received POST request for user with args {name}, {email}, {active}")
-        users.new(name, email, active)
+        try:
+            convo_ids = [int(i) for i in (request.json.get("convo_ids") or [request.json.get("convo_id")])]
+        except ValueError:
+            return {"error": "Invalid value for convo_id(s)"}, 400
+        try:
+            user_ids = [int(i) for i in (request.json.get("user_ids") or [request.json.get("user_id")])]
+        except ValueError:
+            return {"error": "Invalid value for user_id"}, 400
+        contents = request.json.get("contents") or [request.json.get("content")]
+        if len(convo_ids) != len(user_ids) or len(convo_ids) != len(contents):
+            return {"error": "All fields must contain the same number of items"}, 400
+        invalid_options = [[], None, [None]]
+        if convo_ids in invalid_options or user_ids in invalid_options or contents in invalid_options:
+            return {"error": "Missing required fields"}, 400
+        ids = []
+        for convo_id, user_id, content in zip(convo_ids, user_ids, contents):
+            m = Message()
+            m.convo_id = convo_id
+            m.user_id = user_id
+            m.content = content
+            ids.append(msgs_list.query_add(m).message_id)
+        return {"message_ids": ids}
+
+user_fields = {
+    "user_id": fields.Integer,
+    "name": fields.String
+}
+
+class UserList:
+    def __init__(self):
+        self.user_id = -1
+        self.users = []
+
+    def _get_next_user_id(self):
+        self.user_id += 1
+        return self.user_id
+
+    def query_filter(func):
+        def wrapper(self, start=0, end=None, max_results=None, user_ids=None):
+            if user_ids:
+                res = list(filter(lambda m: m.user_id in user_ids, self.users[start:end]))
+            else:
+                return self.users[start:end]
+            max_results = len(res) if max_results == None else max_results
+            return func(self, res[-max_results:])
+        return wrapper
+
+    @query_filter
+    def query_get(self, users):
+        return users
+
+    def query_add(self, user):
+        user.user_id = self._get_next_user_id()
+        self.users.append(user)
+        return user
+
+    def query_update(self, user_id, name):
+        for user in self.users:
+            if user.user_id == user_id:
+                user.name = name
+                return user
+        return None
+
+    @query_filter
+    def query_delete(self, users):
+        ids = []
+        for user in users:
+            ids.append(user.user_id)
+            self.users.remove(user)
+        return ids
+    
+users_list = UserList()
+
+class User(default501):
+    def get(self, user_id):
+        users = users_list.query_get(user_ids=[user_id])
+        if users is None or len(users) == 0:
+            return {"error": f"User {user_id} does not exist"}, 404
+        return marshal(users[0], user_fields)
 
     def put(self, user_id):
-        """
-        Updates the user with the given ID with the given name and email address.
-        """
-        name = request.form.get("name", users[user_id].name)
-        email = request.form.get("email", users[user_id].email)
-        active = request.form.get("active", users[user_id].active)
-        print(f"Received PUT request for user id {user_id} with args {name}, {email}, {active}")
-        users[user_id].name = name
-        users[user_id].email = email
-        users[user_id].active = active
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        u = users_list.query_update(user_id, name)
+        if u is None:
+            return {"error": f"User {user_id} does not exist"}, 404
+        return marshal(u, user_fields)
 
     def delete(self, user_id):
-        """
-        Deletes the user with the given ID.
-        """
-        print(f"Received DELETE request for user id {user_id}")
-        del users[user_id]
+        deleted_ids = users_list.query_delete(user_ids=[user_id])
+        if len(deleted_ids) == 0:
+            return {"error": f"User {user_id} does not exist"}, 404
+        return {"user_id": deleted_ids[0]}
 
-class Users(IndexedCollection):
-    """
-    A collection of users.
-    """
+class Users(default501):
+    def get(self):
+        try:
+            user_ids = [int(id) for id in request.args.get("user_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for user_ids"}, 400
+        try:
+            start = int(request.args.get("start", 0))
+        except ValueError:
+            return {"error": "Invalid value for start"}, 400
+        try:
+            end = int(v) if (v:=request.args.get("end", None)) else None
+        except ValueError:
+            return {"error": "Invalid value for end"}, 400
+
+        return [marshal(u, user_fields) for u in users_list.query_get(start=start, end=end, user_ids=user_ids)]
+    
+    def post(self):
+        # TODO: Implement bulk creation
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        u = User()
+        u.name = name
+        return {"user_id": users_list.query_add(u).user_id}
+    
+    def delete(self):
+        try:
+            user_ids = [int(id) for id in request.json.get("user_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for user_ids"}, 400
+        if user_ids is None:
+            return {"error": "Missing required field"}, 400
+        return {"user_ids": users_list.query_delete(user_ids=user_ids)}
+
+convo_fields = {
+    "convo_id": fields.Integer,
+    "name": fields.String
+}
+
+class ConvoList:
     def __init__(self):
-        super().__init__(User)
+        self.convo_id = -1
+        self.convos = []
 
-users = Users()
+    def _get_next_convo_id(self):
+        self.convo_id += 1
+        return self.convo_id
 
-api.add_resource(Convo, "/convos", "/convo/<int:convo_id>", endpoint="convo")
-api.add_resource(Convo, "/convo/<int:convo_id>/users", "/convo/<int:convo_id>/user/<int:user_id>", endpoint="convo_user")
-api.add_resource(Message, "/convo/<int:convo_id>/messages", "/convo/<int:convo_id>/message/<int:message_id>", "/message/<int:message_id>", endpoint="message")
-api.add_resource(User, "/user/<int:user_id>", "/users", endpoint="user")
+    def query_filter(func):
+        def wrapper(self, start=0, end=None, max_results=None, convo_ids=None):
+            if convo_ids:
+                res = list(filter(lambda m: m.convo_id in convo_ids, self.convos[start:end]))
+            else:
+                return self.convos[start:end]
+            max_results = len(res) if max_results == None else max_results
+            return func(self, res[-max_results:])
+        return wrapper
+
+    @query_filter
+    def query_get(self, convos):
+        return convos
+
+    def query_add(self, convo):
+        convo.convo_id = self._get_next_convo_id()
+        self.convos.append(convo)
+        return convo
+
+    def query_update(self, convo_id, name):
+        for convo in self.convos:
+            if convo.convo_id == convo_id:
+                convo.name = name
+                return convo
+        return None
+
+    @query_filter
+    def query_delete(self, convos):
+        ids = []
+        for convo in convos:
+            ids.append(convo.convo_id)
+            self.convos.remove(convo)
+        return ids
+
+convos_list = ConvoList()
+
+class Convo(default501):
+    def get(self, convo_id):
+        convos = convos_list.query_get(convo_ids=[convo_id])
+        if convos is None or len(convos) == 0:
+            return {"error": f"Convo {convo_id} does not exist"}, 404
+        return marshal(convos[0], convo_fields)
+
+    def put(self, convo_id):
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        c = convos_list.query_update(convo_id, name)
+        if c is None:
+            return {"error": f"Convo {convo_id} does not exist"}, 404
+        return marshal(c, convo_fields)
+    
+    def delete(self, convo_id):
+        deleted_ids = convos_list.query_delete(convo_ids=[convo_id])
+        if len(deleted_ids) == 0:
+            return {"error": f"Convo {convo_id} does not exist"}, 404
+        return {"convo_id": deleted_ids[0]}
+
+class Convos(default501):
+    def get(self):
+        try:
+            convo_ids = [int(id) for id in request.args.get("convo_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for convo_ids"}, 400
+        try:
+            start = int(request.args.get("start", 0))
+        except ValueError:
+            return {"error": "Invalid value for start"}, 400
+        try:
+            end = int(v) if (v:=request.args.get("end", None)) else None
+        except ValueError:
+            return {"error": "Invalid value for end"}, 400
+
+        return [marshal(c, convo_fields) for c in convos_list.query_get(start=start, end=end, convo_ids=convo_ids)]
+    
+    def post(self):
+        # TODO: Implement bulk creation
+        name = request.json.get("name")
+        if name is None:
+            return {"error": "Missing required field"}, 400
+        c = Convo()
+        c.name = name
+        return {"convo_id": convos_list.query_add(c).convo_id}
+
+    def delete(self):
+        try:
+            convo_ids = [int(id) for id in request.json.get("convo_ids", "").split(",") if id] or None
+        except ValueError:
+            return {"error": "Invalid value for convo_ids"}, 400
+        if convo_ids is None:
+            return {"error": "Missing required field"}, 400
+        return {"convo_ids": convos_list.query_delete(convo_ids=convo_ids)}
+
+class ConvoUser(default501):
+    pass
+
+class ConvoUsers(default501):
+    pass
+
+api.add_resource(Message, "/messages/<int:message_id>", endpoint="message")
+api.add_resource(Messages, "/messages", endpoint="messages")
+
+api.add_resource(User, "/users/<int:user_id>", endpoint="user")
+api.add_resource(Users, "/users", endpoint="users")
+
+api.add_resource(Convo, "/convos/<int:convo_id>", endpoint="convo")
+api.add_resource(Convos, "/convos", endpoint="convos")
+
+api.add_resource(ConvoUser, "/convos/<int:convo_id>/users/<int:user_id>", endpoint="convo_user")
+api.add_resource(ConvoUsers, "/convos/<int:convo_id>/users", endpoint="convo_users")
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return {"error": "The requested URL was not found."}, 404
 
 if __name__ == "__main__":
     app.run()
